@@ -4,12 +4,20 @@
 
 import os
 import math
+import time
+from datetime import datetime
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from matplotlib.cm import ScalarMappable
 from matplotlib.colors import LinearSegmentedColormap, Normalize
 import gurobipy as gp
 from gurobipy import GRB
+from configuracao import (
+    INSTANCE_PATH,
+    N_LIMIT,
+    OVERRIDE_P,
+    TIME_LIMIT_SECONDS,
+)
 
 # FUNÇÕES BASE
 # Lê a instância AP, reduz os nós se necessário, calcula as distâncias entre eles e retorna os dados prontos para o modelo de otimização.
@@ -95,7 +103,33 @@ def load_ap_instance(file_path, n_limit=None, override_p=None):
 
 # Resolvendo: cria o modelo no Gurobi > cria as variáveis > cria as restrições > constroi todos os custos e rotas e custos > opta pelo menor custo
 # Calculando quase tudo e escolhendo dessa forma (cresce muito rapidamente)
-def solve_multiple_allocation_p_hub(
+def write_execution_log(log_path, instance_path, nodes, flow, p, event, elapsed=None, detail=None):
+    os.makedirs(os.path.dirname(log_path) or ".", exist_ok=True)
+
+    fields = [
+        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        f"evento={event}",
+        f"instancia={instance_path}",
+        f"nos={len(nodes)}",
+        f"hubs={p}",
+        f"fluxos={len(flow)}",
+    ]
+
+    if elapsed is not None:
+        fields.append(f"tempo_total_s={elapsed:.3f}")
+
+    if detail is not None:
+        fields.append(detail)
+
+    with open(log_path, "a", encoding="utf-8") as log_file:
+        log_file.write(" | ".join(fields) + "\n")
+
+
+class ExecutionTimeLimitReached(Exception):
+    pass
+
+
+def _solve_multiple_allocation_p_hub(
     nodes,
     flow,
     distance,
@@ -103,30 +137,91 @@ def solve_multiple_allocation_p_hub(
     alpha,
     chi,
     delta,
+    instance_path,
     time_limit=300,
+    execution_log_path="Logs/gurobi_execucoes.log",
 ):
+    start_time = time.perf_counter()
+    estimated_route_vars = len(flow) * len(nodes) * len(nodes)
+    write_execution_log(
+        execution_log_path,
+        instance_path,
+        nodes,
+        flow,
+        p,
+        event="INICIO",
+        detail=(
+            f"variaveis_rota_estimadas={estimated_route_vars};"
+            f"limite_tempo_s={time_limit}"
+        ),
+    )
+    print(f"\nInstância em execução: {instance_path}")
+    print(f"Variáveis de rota estimadas: {estimated_route_vars}")
+
+    def finish_log(event, detail=None):
+        elapsed = time.perf_counter() - start_time
+        write_execution_log(
+            execution_log_path,
+            instance_path,
+            nodes,
+            flow,
+            p,
+            event=event,
+            elapsed=elapsed,
+            detail=detail,
+        )
+        print(f"Tempo total da execução: {elapsed:.3f} s")
+        print(f"Log de execução: {execution_log_path}")
+
+    def remaining_time(stage):
+        elapsed = time.perf_counter() - start_time
+        remaining = time_limit - elapsed
+
+        if remaining <= 0:
+            finish_log(
+                "TIMEOUT_TOTAL",
+                detail=f"etapa={stage};limite_tempo_s={time_limit}",
+            )
+            raise ExecutionTimeLimitReached(
+                f"Tempo limite total atingido durante: {stage}."
+            )
+
+        return remaining
+
     try:
         mdl = gp.Model("AP_multiple_allocation_p_hub")
     except gp.GurobiError as error:
         print("\nErro ao iniciar o Gurobi.")
         print("Verifique a instalação e a licença do Gurobi.")
         print(f"Detalhe do erro: {error}")
+        finish_log("ERRO_INICIALIZACAO", detail=f"erro={error}")
         return None, [], {}
+
+    os.makedirs("Logs", exist_ok=True)
+    mdl.Params.LogFile = "Logs/gurobi.log"
+    remaining_time("criacao_variaveis_hub")
 
     # z[k] = 1 se k é hub
     z = mdl.addVars(nodes, vtype=GRB.BINARY, name="z")
 
     # x[i,j,k,m] = 1 se fluxo i->j passa pelos hubs k e m
-    x_keys = []
+    x = gp.tupledict()
+    flow_pairs = list(flow)
+    batch_size = 25
 
-    for (i, j) in flow:
-        for k in nodes:
-            for m in nodes:
-                x_keys.append((i, j, k, m))
-
-    x = mdl.addVars(x_keys, vtype=GRB.BINARY, name="x")
+    for batch_start in range(0, len(flow_pairs), batch_size):
+        remaining_time("criacao_variaveis_rota")
+        batch_pairs = flow_pairs[batch_start:batch_start + batch_size]
+        batch_keys = [
+            (i, j, k, m)
+            for (i, j) in batch_pairs
+            for k in nodes
+            for m in nodes
+        ]
+        x.update(mdl.addVars(batch_keys, vtype=GRB.BINARY, name="x"))
 
     # Restrição 1: abrir exatamente p hubs
+    remaining_time("criacao_restricoes")
     mdl.addConstr(
         gp.quicksum(z[k] for k in nodes) == p,
         name="number_of_hubs"
@@ -134,6 +229,7 @@ def solve_multiple_allocation_p_hub(
 
     # Restrição 2: cada fluxo origem-destino deve escolher uma única rota via hubs
     for (i, j) in flow:
+        remaining_time("criacao_restricoes_atribuicao")
         mdl.addConstr(
             gp.quicksum(x[i, j, k, m] for k in nodes for m in nodes) == 1,
             name=f"assign_{i}_{j}"
@@ -145,6 +241,7 @@ def solve_multiple_allocation_p_hub(
     #
     # Essa versão usa bem menos restrições do que x[i,j,k,m] <= z[k] para todos k,m.
     for (i, j) in flow:
+        remaining_time("criacao_restricoes_hubs")
         for k in nodes:
             mdl.addConstr(
                 gp.quicksum(x[i, j, k, m] for m in nodes) <= z[k],
@@ -158,21 +255,26 @@ def solve_multiple_allocation_p_hub(
 
     # Função objetivo:
     # custo = origem -> primeiro hub + hub -> hub com desconto + segundo hub -> destino
-    objective = gp.quicksum(
-        flow[(i, j)]
-        * (
-            chi * distance[(i, k)]
-            + alpha * distance[(k, m)]
-            + delta * distance[(m, j)]
+    objective = gp.LinExpr()
+
+    for position, ((i, j, k, m), variable) in enumerate(x.items()):
+        if position % 10000 == 0:
+            remaining_time("construcao_objetivo")
+
+        coefficient = (
+            flow[(i, j)]
+            * (
+                chi * distance[(i, k)]
+                + alpha * distance[(k, m)]
+                + delta * distance[(m, j)]
+            )
+            / 1000
         )
-        / 1000
-        * x[i, j, k, m]
-        for (i, j, k, m) in x_keys
-    )
+        objective.addTerms(coefficient, variable)
 
     mdl.setObjective(objective, GRB.MINIMIZE)
 
-    mdl.Params.TimeLimit = time_limit
+    mdl.Params.TimeLimit = remaining_time("inicio_otimizacao")
     mdl.update()
 
     print("\nResumo do modelo:")
@@ -185,10 +287,15 @@ def solve_multiple_allocation_p_hub(
         print("\nErro ao resolver o modelo.")
         print("Verifique a instalação e a licença do Gurobi.")
         print(f"Detalhe do erro: {error}")
+        finish_log("ERRO_OTIMIZACAO", detail=f"erro={error}")
         return mdl, [], {}
 
     if mdl.SolCount == 0:
         print("\nNenhuma solução encontrada.")
+        finish_log(
+            "SEM_SOLUCAO",
+            detail=f"status={mdl.Status};tempo_gurobi_s={mdl.Runtime:.3f}",
+        )
         return mdl, [], {}
 
     selected_hubs = [
@@ -199,6 +306,7 @@ def solve_multiple_allocation_p_hub(
     selected_routes = {}
 
     for (i, j) in flow:
+        remaining_time("leitura_solucao")
         found_route = False
 
         for k in nodes:
@@ -215,12 +323,27 @@ def solve_multiple_allocation_p_hub(
     print("Status:", mdl.Status)
     print("Custo objetivo:", mdl.ObjVal)
     print("Hubs escolhidos:", selected_hubs)
+    finish_log(
+        "SOLUCAO",
+        detail=(
+            f"status={mdl.Status};tempo_gurobi_s={mdl.Runtime:.3f};"
+            f"objetivo={mdl.ObjVal:.6f};hubs_escolhidos={selected_hubs}"
+        ),
+    )
 
     print("\nRotas escolhidas:")
     for (i, j), (k, m) in selected_routes.items():
         print(f"{i} -> {j}: {i} -> hub {k} -> hub {m} -> {j}")
 
     return mdl, selected_hubs, selected_routes
+
+
+def solve_multiple_allocation_p_hub(*args, **kwargs):
+    try:
+        return _solve_multiple_allocation_p_hub(*args, **kwargs)
+    except ExecutionTimeLimitReached as error:
+        print(f"\n{error}")
+        return None, [], {}
 
 
 #plotando a solução
@@ -322,17 +445,8 @@ def plot_solution(coords, flow, selected_hubs, selected_routes, output_path):
 def main():
     os.makedirs("outputs", exist_ok=True)
 
-    # Caminho da instância AP
-    instance_path = "data/APdata/20.3"
-
-    #Até qual nó da instância está indo
-    N_LIMIT = 20
-
-    # Quantos hubs vamos escolher
-    OVERRIDE_P = 3
-
     nodes, coords, flow, distance, p, alpha, chi, delta = load_ap_instance(
-        file_path=instance_path,
+        file_path=INSTANCE_PATH,
         n_limit=N_LIMIT,
         override_p=OVERRIDE_P,
     )
@@ -345,7 +459,8 @@ def main():
         alpha=alpha,
         chi=chi,
         delta=delta,
-        time_limit=300,
+        instance_path=INSTANCE_PATH,
+        time_limit=TIME_LIMIT_SECONDS,
     )
 
     if selected_hubs:

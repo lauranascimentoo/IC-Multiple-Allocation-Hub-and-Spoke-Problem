@@ -2,9 +2,10 @@ import os
 import math
 import pandas as pd
 import matplotlib.pyplot as plt
+from configuracao import INSTANCE_PATH, N_LIMIT, OVERRIDE_P
 
 
-def load_ap_instance_raw(file_path):
+def load_ap_instance_raw(file_path, n_limit=None, override_p=None):
     """
     Lê uma instância AP e organiza os dados em estruturas mais fáceis de visualizar.
     """
@@ -51,13 +52,33 @@ def load_ap_instance_raw(file_path):
     chi = float(tokens[idx])
     idx += 1
 
+    if n_limit is not None:
+        n = min(n_limit, n)
+        nodes = list(range(1, n + 1))
+        coords = {node: coords[node] for node in nodes}
+        flow_matrix = [row[:n] for row in flow_matrix[:n]]
+
+    if override_p is not None:
+        p = override_p
+    else:
+        p = min(p, n)
+
     return n, nodes, coords, flow_matrix, p, delta, alpha, chi
 
 
-def create_visual_outputs(file_path, output_folder="outputs/instance_view"):
+def create_visual_outputs(
+    file_path,
+    n_limit=None,
+    override_p=None,
+    output_folder="outputs/instance_view",
+):
     os.makedirs(output_folder, exist_ok=True)
 
-    n, nodes, coords, flow_matrix, p, delta, alpha, chi = load_ap_instance_raw(file_path)
+    n, nodes, coords, flow_matrix, p, delta, alpha, chi = load_ap_instance_raw(
+        file_path,
+        n_limit=n_limit,
+        override_p=override_p,
+    )
 
     coords_df = pd.DataFrame([
         {
@@ -228,10 +249,10 @@ def plot_distance_heatmap(distance_df, output_folder):
 
 
 def main():
-    instance_path = "data/APdata/20.3"
-
     create_visual_outputs(
-        file_path=instance_path,
+        file_path=INSTANCE_PATH,
+        n_limit=N_LIMIT,
+        override_p=OVERRIDE_P,
         output_folder="outputs/instance_view",
     )
 

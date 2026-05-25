@@ -1,0 +1,14 @@
+2026-05-25 13:24:11 | evento=INICIO | instancia=data/APdata/20.3 | nos=5 | hubs=2 | fluxos=20 | variaveis_rota_estimadas=500;limite_tempo_s=30
+2026-05-25 13:24:12 | evento=SOLUCAO | instancia=data/APdata/20.3 | nos=5 | hubs=2 | fluxos=20 | tempo_total_s=1.044 | status=2;tempo_gurobi_s=0.237;objetivo=7981.491485;hubs_escolhidos=[2, 5]
+2026-05-25 13:31:47 | evento=INICIO | instancia=data/APdata/200.3 | nos=200 | hubs=3 | fluxos=39800 | variaveis_rota_estimadas=1592000000;limite_tempo_s=300
+2026-05-25 13:38:35 | evento=INICIO | instancia=data/APdata/200.3 | nos=200 | hubs=3 | fluxos=39800 | variaveis_rota_estimadas=1592000000;limite_tempo_s=300
+2026-05-25 13:38:35 | evento=CANCELADO_TAMANHO_MODELO | instancia=data/APdata/200.3 | nos=200 | hubs=3 | fluxos=39800 | tempo_total_s=0.002 | limite_variaveis_rota=2000000
+2026-05-25 13:41:26 | evento=INICIO | instancia=data/APdata/200.3 | nos=200 | hubs=3 | fluxos=39800 | variaveis_rota_estimadas=1592000000;limite_tempo_s=300
+2026-05-25 13:41:26 | evento=CANCELADO_TAMANHO_MODELO | instancia=data/APdata/200.3 | nos=200 | hubs=3 | fluxos=39800 | tempo_total_s=0.001 | limite_variaveis_rota=2000000
+2026-05-25 13:41:39 | evento=INICIO | instancia=data/APdata/100.3 | nos=100 | hubs=3 | fluxos=9900 | variaveis_rota_estimadas=99000000;limite_tempo_s=300
+2026-05-25 13:41:39 | evento=CANCELADO_TAMANHO_MODELO | instancia=data/APdata/100.3 | nos=100 | hubs=3 | fluxos=9900 | tempo_total_s=0.001 | limite_variaveis_rota=2000000
+2026-05-25 13:48:42 | evento=INICIO | instancia=data/APdata/100.3 | nos=100 | hubs=3 | fluxos=9900 | variaveis_rota_estimadas=99000000;limite_tempo_s=300
+2026-05-25 14:00:01 | evento=INICIO | instancia=data/APdata/100.3 | nos=90 | hubs=3 | fluxos=8010 | variaveis_rota_estimadas=64881000;limite_tempo_s=300
+2026-05-25 14:09:13 | evento=INICIO | instancia=data/APdata/100.3 | nos=80 | hubs=3 | fluxos=6320 | variaveis_rota_estimadas=40448000;limite_tempo_s=300
+2026-05-25 14:10:12 | evento=INICIO | instancia=data/APdata/50.3 | nos=50 | hubs=3 | fluxos=2450 | variaveis_rota_estimadas=6125000;limite_tempo_s=300
+2026-05-25 14:14:26 | evento=SOLUCAO | instancia=data/APdata/50.3 | nos=50 | hubs=3 | fluxos=2450 | tempo_total_s=253.965 | status=2;tempo_gurobi_s=218.582;objetivo=156568.765806;hubs_escolhidos=[14, 28, 35]

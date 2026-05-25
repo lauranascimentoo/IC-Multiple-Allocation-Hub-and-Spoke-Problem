@@ -5,7 +5,8 @@
 import os
 import math
 import matplotlib.pyplot as plt
-from docplex.mp.model import Model
+import gurobipy as gp
+from gurobipy import GRB
 
 # FUNÇÕES BASE
 # Lê a instância AP, reduz os nós se necessário, calcula as distâncias entre eles e retorna os dados prontos para o modelo de otimização.
@@ -89,7 +90,7 @@ def load_ap_instance(file_path, n_limit=None, override_p=None):
     return nodes, coords, flow, distance, p, alpha, chi, delta
 
 
-# Resolvendo: cria o modelo no Cplex > cria as variáveis > cria as restrições > constroi todos os custos e rotas e custos > opta pelo menor custo
+# Resolvendo: cria o modelo no Gurobi > cria as variáveis > cria as restrições > constroi todos os custos e rotas e custos > opta pelo menor custo
 # Calculando quase tudo e escolhendo dessa forma (cresce muito rapidamente)
 def solve_multiple_allocation_p_hub(
     nodes,
@@ -101,10 +102,16 @@ def solve_multiple_allocation_p_hub(
     delta,
     time_limit=300,
 ):
-    mdl = Model(name="AP_multiple_allocation_p_hub")
+    try:
+        mdl = gp.Model("AP_multiple_allocation_p_hub")
+    except gp.GurobiError as error:
+        print("\nErro ao iniciar o Gurobi.")
+        print("Verifique a instalação e a licença do Gurobi.")
+        print(f"Detalhe do erro: {error}")
+        return None, [], {}
 
     # z[k] = 1 se k é hub
-    z = mdl.binary_var_dict(nodes, name="z")
+    z = mdl.addVars(nodes, vtype=GRB.BINARY, name="z")
 
     # x[i,j,k,m] = 1 se fluxo i->j passa pelos hubs k e m
     x_keys = []
@@ -114,19 +121,19 @@ def solve_multiple_allocation_p_hub(
             for m in nodes:
                 x_keys.append((i, j, k, m))
 
-    x = mdl.binary_var_dict(x_keys, name="x")
+    x = mdl.addVars(x_keys, vtype=GRB.BINARY, name="x")
 
     # Restrição 1: abrir exatamente p hubs
-    mdl.add_constraint(
-        mdl.sum(z[k] for k in nodes) == p,
-        ctname="number_of_hubs"
+    mdl.addConstr(
+        gp.quicksum(z[k] for k in nodes) == p,
+        name="number_of_hubs"
     )
 
     # Restrição 2: cada fluxo origem-destino deve escolher uma única rota via hubs
     for (i, j) in flow:
-        mdl.add_constraint(
-            mdl.sum(x[i, j, k, m] for k in nodes for m in nodes) == 1,
-            ctname=f"assign_{i}_{j}"
+        mdl.addConstr(
+            gp.quicksum(x[i, j, k, m] for k in nodes for m in nodes) == 1,
+            name=f"assign_{i}_{j}"
         )
 
     # Restrição 3 compacta:
@@ -136,19 +143,19 @@ def solve_multiple_allocation_p_hub(
     # Essa versão usa bem menos restrições do que x[i,j,k,m] <= z[k] para todos k,m.
     for (i, j) in flow:
         for k in nodes:
-            mdl.add_constraint(
-                mdl.sum(x[i, j, k, m] for m in nodes) <= z[k],
-                ctname=f"use_first_hub_{i}_{j}_{k}"
+            mdl.addConstr(
+                gp.quicksum(x[i, j, k, m] for m in nodes) <= z[k],
+                name=f"use_first_hub_{i}_{j}_{k}"
             )
 
-            mdl.add_constraint(
-                mdl.sum(x[i, j, m, k] for m in nodes) <= z[k],
-                ctname=f"use_second_hub_{i}_{j}_{k}"
+            mdl.addConstr(
+                gp.quicksum(x[i, j, m, k] for m in nodes) <= z[k],
+                name=f"use_second_hub_{i}_{j}_{k}"
             )
 
     # Função objetivo:
     # custo = origem -> primeiro hub + hub -> hub com desconto + segundo hub -> destino
-    objective = mdl.sum(
+    objective = gp.quicksum(
         flow[(i, j)]
         * (
             chi * distance[(i, k)]
@@ -160,29 +167,30 @@ def solve_multiple_allocation_p_hub(
         for (i, j, k, m) in x_keys
     )
 
-    mdl.minimize(objective)
+    mdl.setObjective(objective, GRB.MINIMIZE)
 
-    mdl.parameters.timelimit = time_limit
+    mdl.Params.TimeLimit = time_limit
+    mdl.update()
 
     print("\nResumo do modelo:")
-    print(f"Variáveis totais: {mdl.number_of_variables}")
-    print(f"Restrições totais: {mdl.number_of_constraints}")
+    print(f"Variáveis totais: {mdl.NumVars}")
+    print(f"Restrições totais: {mdl.NumConstrs}")
 
     try:
-        solution = mdl.solve(log_output=True)
-    except Exception as error:
+        mdl.optimize()
+    except gp.GurobiError as error:
         print("\nErro ao resolver o modelo.")
-        print("Possível causa: limite da versão gratuita do CPLEX.")
+        print("Verifique a instalação e a licença do Gurobi.")
         print(f"Detalhe do erro: {error}")
         return mdl, [], {}
 
-    if solution is None:
+    if mdl.SolCount == 0:
         print("\nNenhuma solução encontrada.")
         return mdl, [], {}
 
     selected_hubs = [
         k for k in nodes
-        if z[k].solution_value > 0.5
+        if z[k].X > 0.5
     ]
 
     selected_routes = {}
@@ -192,7 +200,7 @@ def solve_multiple_allocation_p_hub(
 
         for k in nodes:
             for m in nodes:
-                if x[i, j, k, m].solution_value > 0.5:
+                if x[i, j, k, m].X > 0.5:
                     selected_routes[(i, j)] = (k, m)
                     found_route = True
                     break
@@ -201,8 +209,8 @@ def solve_multiple_allocation_p_hub(
                 break
 
     print("\nSolução encontrada.")
-    print("Status:", mdl.solve_details.status)
-    print("Custo objetivo:", mdl.objective_value)
+    print("Status:", mdl.Status)
+    print("Custo objetivo:", mdl.ObjVal)
     print("Hubs escolhidos:", selected_hubs)
 
     print("\nRotas escolhidas:")
@@ -279,10 +287,10 @@ def main():
     instance_path = "data/APdata/20.3"
 
     #Até qual nó da instância está indo
-    N_LIMIT = 5
+    N_LIMIT = 20
 
     # Quantos hubs vamos escolher
-    OVERRIDE_P = 2
+    OVERRIDE_P = 3
 
     nodes, coords, flow, distance, p, alpha, chi, delta = load_ap_instance(
         file_path=instance_path,
@@ -312,3 +320,10 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+    #stream_lite - biblio p visualização (verse faz sentido usar junto a um mapa)
+    #dif hub spoke por cor
+    #largura das linhas de conexão proporcionais ao fluxo
+    #iterativo com usuario para ajustar parametros
+    #imagem de resultado
+    #aplicação web - 

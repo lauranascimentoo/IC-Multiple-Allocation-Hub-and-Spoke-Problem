@@ -1,0 +1,25 @@
+
+Gurobi 11.0.3 (win64, gurobi_cl) logging started Mon May 25 10:41:37 2026
+
+Set parameter WLSAccessID
+Set parameter WLSSecret
+Set parameter LicenseID to value 2537843
+Set parameter LogFile to value "gurobi.log"
+Using license file C:\gurobi1103\win64\licenses\gurobi.lic
+
+Gurobi 11.0.3 (win64, gurobi_cl) logging started Mon May 25 10:42:08 2026
+
+Set parameter WLSAccessID
+Set parameter WLSSecret
+Set parameter LicenseID to value 2537843
+Set parameter LogFile to value "gurobi.log"
+Using license file C:\gurobi1103\win64\licenses\gurobi.lic
+
+Gurobi 11.0.3 (win64, gurobi_cl) logging started Mon May 25 10:47:45 2026
+
+Set parameter WLSAccessID
+Set parameter WLSSecret
+Set parameter LicenseID to value 2537843
+Set parameter LogFile to value "gurobi.log"
+Using license file C:\gurobi1103\win64\licenses\gurobi.lic
+Academic license 2537843 - for non-commercial use only - registered to la___@ufmg.br

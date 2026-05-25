@@ -5,6 +5,9 @@
 import os
 import math
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
+from matplotlib.cm import ScalarMappable
+from matplotlib.colors import LinearSegmentedColormap, Normalize
 import gurobipy as gp
 from gurobipy import GRB
 
@@ -221,60 +224,96 @@ def solve_multiple_allocation_p_hub(
 
 
 #plotando a solução
-def plot_solution(coords, selected_hubs, selected_routes, output_path):
+def plot_solution(coords, flow, selected_hubs, selected_routes, output_path):
     """
-    Plota a malha da solução.
+    Plota a rede com hubs destacados e largura proporcional ao fluxo agregado.
     """
 
-    plt.figure(figsize=(10, 8))
-
-    # Plotar os nós
-    for node, (x_coord, y_coord) in coords.items():
-        if node in selected_hubs:
-            plt.scatter(x_coord, y_coord, marker="*", s=350)
-            plt.text(x_coord + 1, y_coord + 1, f"H{node}", fontsize=11)
-        else:
-            plt.scatter(x_coord, y_coord, marker="o", s=90)
-            plt.text(x_coord + 1, y_coord + 1, str(node), fontsize=9)
-
-    # Plotar as arestas usadas pelas rotas
-    plotted_edges = set()
+    fig, ax = plt.subplots(figsize=(12, 8))
+    hub_set = set(selected_hubs)
+    edge_flows = {}
 
     for (i, j), (k, m) in selected_routes.items():
-        route_edges = [
-            (i, k),
-            (k, m),
-            (m, j),
-        ]
-
-        for a, b in route_edges:
+        for a, b in [(i, k), (k, m), (m, j)]:
             if a == b:
                 continue
 
             edge = tuple(sorted((a, b)))
+            edge_flows[edge] = edge_flows.get(edge, 0) + flow[(i, j)]
 
-            if edge in plotted_edges:
-                continue
+    min_flow = min(edge_flows.values(), default=0)
+    max_flow = max(edge_flows.values(), default=1)
+    flow_norm = Normalize(vmin=min_flow, vmax=max_flow)
+    flow_cmap = LinearSegmentedColormap.from_list(
+        "fluxo_azul",
+        ["#d9e3ee", "#93abc1", "#486c8c", "#163a5b"],
+    )
 
-            plotted_edges.add(edge)
+    for (a, b), edge_flow in edge_flows.items():
+        xa, ya = coords[a]
+        xb, yb = coords[b]
+        scaled_flow = math.sqrt(edge_flow / max_flow)
+        is_hub_link = a in hub_set and b in hub_set
 
-            xa, ya = coords[a]
-            xb, yb = coords[b]
+        ax.plot(
+            [xa, xb],
+            [ya, yb],
+            color=flow_cmap(flow_norm(edge_flow)),
+            linewidth=0.6 + 5.6 * scaled_flow,
+            alpha=0.9 if is_hub_link else 0.72,
+            solid_capstyle="round",
+            zorder=2 if is_hub_link else 1,
+        )
 
-            plt.plot(
-                [xa, xb],
-                [ya, yb],
-                linewidth=1,
-                alpha=0.45,
+    for node, (x_coord, y_coord) in coords.items():
+        if node in hub_set:
+            ax.scatter(
+                x_coord, y_coord, marker="o", s=250, color="#d62728",
+                edgecolors="black", linewidths=1.2, zorder=4,
+            )
+            ax.annotate(
+                f"H{node}", (x_coord, y_coord), xytext=(0, 13),
+                textcoords="offset points", ha="center", fontsize=10,
+                fontweight="bold", color="#8b0000", zorder=5,
+            )
+        else:
+            ax.scatter(
+                x_coord, y_coord, marker="o", s=75, color="#2166f3",
+                edgecolors="white", linewidths=0.8, zorder=3,
+            )
+            ax.annotate(
+                str(node), (x_coord, y_coord), xytext=(5, 5),
+                textcoords="offset points", fontsize=8, color="#222222",
+                zorder=5,
             )
 
-    plt.title("Solução AP - Multiple Allocation p-Hub Median")
-    plt.xlabel("Coordenada X")
-    plt.ylabel("Coordenada Y")
-    plt.grid(True)
-    plt.tight_layout()
+    legend_elements = [
+        Line2D([0], [0], marker="o", color="none", markerfacecolor="#d62728",
+               markeredgecolor="black", markersize=9, label="Hub"),
+        Line2D([0], [0], marker="o", color="none", markerfacecolor="#2166f3",
+               markeredgecolor="white", markersize=7, label="Spoke"),
+    ]
 
-    plt.savefig(output_path, dpi=300)
+    ax.legend(
+        handles=legend_elements,
+        loc="upper right",
+        framealpha=0.96,
+    )
+    scalar_mappable = ScalarMappable(norm=flow_norm, cmap=flow_cmap)
+    scalar_mappable.set_array([])
+    colorbar = fig.colorbar(scalar_mappable, ax=ax, pad=0.02, fraction=0.045)
+    colorbar.set_label("Fluxo agregado na conexão")
+    ax.set_title("Solução AP - Rede hub-and-spoke", fontsize=14, pad=12)
+    ax.set_xlabel("Coordenada X")
+    ax.set_ylabel("Coordenada Y")
+    ax.set_aspect("equal", adjustable="box")
+    ax.grid(True, color="#e6e6e6", linewidth=0.8)
+    ax.set_axisbelow(True)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    fig.tight_layout()
+
+    fig.savefig(output_path, dpi=300, bbox_inches="tight")
     print(f"\nFigura salva em: {output_path}")
 
     plt.show()
@@ -312,6 +351,7 @@ def main():
     if selected_hubs:
         plot_solution(
             coords=coords,
+            flow=flow,
             selected_hubs=selected_hubs,
             selected_routes=selected_routes,
             output_path="outputs/ap_solution.png",
